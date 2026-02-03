@@ -274,10 +274,10 @@ MIT License - see [LICENSE](LICENSE)
 ## Contact
 
 **Creator:** [Achusi Desmond]
-- Portfolio: https://Dessybabybaby.github.io/portfolio-site
-- GitHub: [@Dessybabybay](https://github.com/Dessybabybaby)
+- Portfolio: [My Story](https://Dessybabybaby.github.io/portfolio-site)
+- GitHub: [Dessybabybay](https://github.com/Dessybabybaby)
+- LinkedIn: [Achusi Desond](https://linkedin.com/in/achusi-desmond)
 
 ---
 
 **If this tool helps secure your infrastructure, please star the repo!**
-```
