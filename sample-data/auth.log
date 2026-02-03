@@ -1,0 +1,13 @@
+Jan 19 10:15:30 server sshd[12345]: Accepted publickey for admin from 192.168.1.100 port 54321 ssh2
+Jan 19 10:20:15 server sshd[12346]: Failed password for root from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:16 server sshd[12347]: Failed password for root from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:17 server sshd[12348]: Failed password for root from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:18 server sshd[12349]: Failed password for admin from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:19 server sshd[12350]: Failed password for admin from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:20 server sshd[12351]: Failed password for user from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:21 server sshd[12352]: Failed password for user from 45.33.21.10 port 22 ssh2
+Jan 19 10:20:22 server sshd[12353]: Failed password for test from 45.33.21.10 port 22 ssh2
+Jan 19 10:25:00 server sshd[12354]: Invalid user test123 from 203.0.113.50 port 22
+Jan 19 10:25:01 server sshd[12355]: Invalid user admin123 from 203.0.113.50 port 22
+Jan 19 10:25:02 server sshd[12356]: Invalid user guest from 203.0.113.50 port 22
+Jan 19 11:00:00 server sshd[12357]: Accepted publickey for admin from 192.168.1.100 port 54322 ssh2
