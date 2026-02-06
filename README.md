@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![n8n](https://img.shields.io/badge/n8n-workflow-orange)](https://n8n.io)
 
-![Workflow Screenshot](media/workflow-screenshot.png)
+![Workflow Screenshot](media/workflow-screenshot-lfa.png)
 
 ---
 
@@ -94,6 +94,8 @@ Full walkthrough available after workflow build completion.
 
 3. **Upload sample log file:**
    - Place log file in `/tmp/access.log` or configure path
+     or
+   - HTTP Request: `https://sample-server/access.log`
 
 4. **Execute workflow:**
    - Click "Execute Workflow"
@@ -222,7 +224,7 @@ Final Threat Score = Capped at 100
 
 **`sample-data/auth.log`** - SSH brute force attempts
 
-**`sample-data/threat-report-sample.html`** - Expected output report
+**`sample-data/report_file-sample.html`** - Expected output report
 
 ### Running Test
 
@@ -230,7 +232,10 @@ Final Threat Score = Capped at 100
 2. Place in `/tmp/access.log`
 3. Execute workflow
 4. Compare output with `sample-data/threat-report-sample.html`
-
+   or
+1. HTTP Request: `https://sample-server/access.log`
+2. Execute workflow
+3. Compare output with `sample-data/report_file-sample.html`
 ---
 
 ## Troubleshooting
