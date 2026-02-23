@@ -1,6 +1,6 @@
 # Log File Analyzer
 
-> Automated security log analysis system using n8n to detect threats, brute force attacks, SQL injection attempts, and anomalies in Apache/Nginx/syslog files
+> Lightweight SOAR pipeline built with n8n to detect threats and attacker behavior through behavioral kill-chain scoring and IP reputation intelligence
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![n8n](https://img.shields.io/badge/n8n-workflow-orange)](https://n8n.io)
@@ -26,43 +26,43 @@
 
 ## Overview
 
-**Problem:** System administrators manually review thousands of log entries daily to detect security threats. Critical incidents (brute force attacks, SQL injection, privilege escalation) can be missed in the noise of normal traffic.
+**Problem:** Standard security tools often generate thousands of alerts based on "loud" events (like 1,000 requests to a bad URL), leading to alert fatigue for SOC analysts.
 
-**Solution:** This n8n workflow automatically parses Apache/Nginx access logs and syslog files, detects suspicious patterns using regex and threat intelligence, calculates threat scores per IP, and generates actionable HTML security reports.
+**Solution:** This n8n workflow replaces basic line-scoring with a behavioral kill-chain model. It tracks attacker intent over time, correlates internal behavior with external threat intelligence (AbuseIPDB), and uses persistent storage to prevent duplicate alerts.
 
 **Technology:**
 - n8n (workflow automation)
-- Regex pattern matching for threat detection
-- IP-based threat scoring and aggregation
-- HTML report generation
+- AbuseIPDB API (External Threat Intel)
+- Kill-Chain Scoring (Recon -> Discovery -> Exploit -> Compromise)
+- Persistent Data Store (Deduplication cache)
+- GitHub API (Incident ticket automation)
 - Email/Slack alerting
 
-**Use Cases:**
-- Web server security monitoring (Apache, Nginx)
-- SSH brute force detection (auth.log)
-- SQL injection attempt detection
-- DDoS pattern recognition
-- Automated incident response
+## Use Cases
+
+- **Behavioral Web Security Monitoring** - Identifying the progression of attackers from recon to exploitation on Apache and Nginx servers.
+- **Brute Force & Credential Stuffing Mitigation** - High-velocity detection of automated login attempts with adaptive scoring multipliers.
+- **Advanced Exploitation Tracking** - Correlation of SQL injection, XSS, and Path Traversal attempts across the Cyber Kill Chain.
+- **DDoS & Botnet Pattern Recognition** - Identifying high-traffic automation tools and large-scale scanning botnets.
+- **Autonomous Incident Response** - Fully automated triaging, reputation verification, and incident ticketing to reduce Mean Time to Respond (MTTR).
+- **Alert Fatigue Mitigation** - Intelligent deduplication of repeating threats to ensure SOC teams only see unique, actionable incidents.
 
 ---
 
 ## Features
 
-- **Multi-log format support** - Apache, Nginx, syslog, auth.log
-- **Real-time threat detection** - 10+ attack pattern types
-- **IP reputation scoring** - Aggregate threats by source IP
-- **Automated reporting** - HTML reports with charts and tables
-- **Rate limiting detection** - Identify brute force attempts (>100 req/min)
-- **False positive filtering** - Whitelist known IPs
-- **Email/Slack alerts** - Instant notifications for critical threats
-- **Historical tracking** - CSV logs for trend analysis
+- **Behavioral Analysis** - Detects attack progression (Kill Chain) rather than just single events.
+- **Smart Deduplication** - Prevents ticket flooding by caching incidents for 24 hours.
+- **Multi-log Parsing** - Unified support for Apache, Nginx, and Linux Auth logs.
+- **Executive HTML Reports** - Detailed summaries including "Automated Actions Taken" for management review.
+- **Autonomous Response** - Automatically flags IPs for blocking based on reputation and intent.
+- **SOC Ticket Integration** - Direct integration with [soc-incident](https://github.com/Dessybabybaby/soc-incident) for manual review.
 
 ---
 
 ## Demo
 
 ### Audio Case Study (Coming Soon)
-Full walkthrough available after workflow build completion.
 
 ### Visual Demo
 ![Demo GIF](media/demo.gif)
@@ -73,11 +73,11 @@ Full walkthrough available after workflow build completion.
 
 **Required:**
 - **n8n instance** (self-hosted or cloud)
-- **Server log files** (Apache access.log, auth.log, or similar)
+- **AbuseIPDB API Key** (For reputation lookups)
+- **GitHub Personal Access Token** (For ticket creation)
 
 **Optional:**
 - **Email/Slack** for alerts
-- **Web server access** for automated log retrieval
 
 ---
 
@@ -92,10 +92,9 @@ Full walkthrough available after workflow build completion.
 2. **Import to n8n:**
    - Workflows → Import from File → Select JSON
 
-3. **Upload sample log file:**
-   - Place log file in `/tmp/access.log` or configure path
-     or
-   - HTTP Request: `https://sample-server/access.log`
+3. **Configure Credentials:**
+   - Set up **GitHub API** credentials for your incident repo.
+   - Set up **AbuseIPDB** as a Header Auth credential (Key: `your-api-key`).
 
 4. **Execute workflow:**
    - Click "Execute Workflow"
@@ -110,109 +109,51 @@ Full walkthrough available after workflow build completion.
 
 ### Analyzing Log Files
 
-**Supported Log Formats:**
-
-**Apache Combined Log:**
-```
-192.168.1.100 - - [19/Jan/2026:15:30:45 +0000] "GET /admin HTTP/1.1" 404 512 "-" "Mozilla/5.0"
-```
-
-**Nginx Access Log:**
-```
-192.168.1.100 - - [19/Jan/2026:15:30:45 +0000] "POST /login HTTP/1.1" 401 128
-```
-
-**Linux auth.log (SSH):**
-```
-Jan 19 15:30:45 server sshd[12345]: Failed password for root from 192.168.1.100 port 22 ssh2
-```
-
-### Running Analysis
-
-**Manual:**
-1. Upload log file to n8n server
-2. Update file path in "Read Log File" node
-3. Execute workflow
-4. Download HTML report
-
-**Automated:**
-1. Replace Manual Trigger with Schedule Trigger
-2. Configure log file path (e.g., `/var/log/apache2/access.log`)
-3. Activate workflow
-4. Reports generated daily
+The workflow handles the following transitions:
+1. **Parse:** Converts raw lines into IP-based objects.
+2. **Score:** Assigns weight based on the attack stage (e.g., Recon vs. Exploitation).
+3. **Verify:** Checks AbuseIPDB to see if the IP is a known malicious actor.
+4. **Act:** Decisions are made to **BLOCK**, **INVESTIGATE**, or **MONITOR**.
 
 ### Reading Reports
 
 **HTML Report Sections:**
 
-1. **Executive Summary**
-   - Total requests analyzed
-   - Threats detected (count + %)
-   - Top threat types
-   - Critical IPs flagged
-
-2. **Top Threat IPs Table**
-   - IP address
-   - Request count
-   - Threat score (0-100)
-   - Attack types detected
-   - Recommended action (Block/Monitor/Whitelist)
-
-3. **Threat Timeline**
-   - Hourly distribution of attacks
-   - Spike detection
-
-4. **Attack Pattern Breakdown**
-   - SQL injection attempts: X
-   - Path traversal: X
-   - Brute force: X
-   - Scanner activity: X
+1. **Executive Summary:** Quick stats on requests, unique IPs, and blocked threats.
+2. **Automated Actions Taken:** A management-level table showing exact counts of Blocks vs. Investigations.
+3. **Top 10 Threat IPs:** Detailed table showing IP, Risk Level, Score, and specific Behavioral Patterns (e.g., "recon, discovery").
 
 ---
 
 ## Threat Detection
 
-### Detection Patterns
+### Detection Patterns & Kill Chain
 
-| Attack Type | Pattern | Example | Severity |
-|-------------|---------|---------|----------|
-| **SQL Injection** | `union select`, `' or 1=1`, `drop table` | `/search?q=' OR 1=1--` | CRITICAL |
-| **Path Traversal** | `../`, `..%2f`, `....//` | `/files/../../../etc/passwd` | HIGH |
-| **XSS Attempt** | `<script>`, `javascript:`, `onerror=` | `/comment?text=<script>alert(1)</script>` | HIGH |
-| **Admin Panel Probing** | `/admin`, `/phpmyadmin`, `/wp-admin` | `GET /admin HTTP/1.1` | MEDIUM |
-| **Brute Force** | >100 requests/min from single IP | 150 requests in 60 seconds | HIGH |
-| **Scanner Activity** | `/config.php`, `/.env`, `/backup.sql` | `GET /.env HTTP/1.1` | MEDIUM |
-| **Shell Upload** | `cmd.php`, `shell.asp`, `.jsp` | `POST /uploads/cmd.php` | CRITICAL |
-| **404 Scanning** | >20 sequential 404s | 25 consecutive not-found errors | LOW |
-| **Auth Failures** | Failed password, Invalid user | `Failed password for root` | MEDIUM |
-| **Rate Limiting** | Excessive requests (>500/min) | DDoS pattern | HIGH |
+Instead of scoring lines, we score **attacker behavior per IP**.
 
-### Threat Scoring Algorithm
-```
-Base Score = 0
+| Behavior Stage | Meaning | Score |
+| :--- | :--- | :--- |
+| **Recon** | Path scanning / 404 probing | +10 |
+| **Discovery** | Admin panel / Privilege probing | +15 |
+| **Brute Force** | Authentication failures | +20 |
+| **Exploitation** | SQLi or XSS attempts | +40 |
+| **Compromise** | Shell upload attempts | +60 |
 
-For each request:
-  IF SQL Injection detected: +30
-  IF Path Traversal detected: +25
-  IF XSS detected: +20
-  IF Admin probing: +10
-  IF Scanner activity: +15
-  IF Shell upload: +35
-  IF Auth failure: +10
-  
-Rate multipliers:
-  IF requests > 500/min: Score × 2
-  IF requests > 100/min: Score × 1.5
-  IF sequential 404s > 20: +20
+### Behavioral Scoring Algorithm
+```javascript
+Total Score = sum(Behavior Stages) 
+
+// Adjustments:
+IF requests > 200: +25 (Automation/Bot Detection)
+IF behaviors >= 3: +20 (Multi-stage Attack Bonus)
 
 Final Threat Score = Capped at 100
 ```
 
-**Score Interpretation:**
-- **0-20:** Low risk (normal traffic)
-- **21-50:** Medium risk (suspicious, monitor)
-- **51-80:** High risk (likely attacker, block recommended)
-- **81-100:** Critical (active attack, immediate action)
+**Decision Matrix:**
+- **80-100 (CRITICAL):** Action -> BLOCK (Requires Malicious Rep + Attack Progression)
+- **50-79 (HIGH):** Action -> INVESTIGATE (Opens GitHub Ticket)
+- **25-49 (MEDIUM):** Action -> MONITOR (Logged in report only)
 
 ---
 
@@ -220,44 +161,49 @@ Final Threat Score = Capped at 100
 
 ### Test Log Files
 
-**`sample-data/access.log`** - Apache access log with injected threats
-
-**`sample-data/auth.log`** - SSH brute force attempts
-
-**`sample-data/report_file-sample.html`** - Expected output report
+**`sample-data/access.log`** 
+**`sample-data/report_file-sample.html`**
 
 ### Running Test
 
-1. Download sample log: `sample-data/access.log`
-2. Place in `/tmp/access.log`
-3. Execute workflow
-4. Compare output with `sample-data/threat-report-sample.html`
-   or
-1. HTTP Request: `https://sample-server/access.log`
-2. Execute workflow
-3. Compare output with `sample-data/report_file-sample.html`
+### Method 1: GitHub-Hosted Log Analysis (Recommended)
+1. Ensure your log file (e.g., `access.log`) is pushed to your GitHub repository.
+2. Copy the **Raw** URL of the file from GitHub.
+3. In n8n, open the **Read Log File** node and paste the URL into the HTTP Request field.
+4. Execute the workflow. 
+5. **Expected Result:** The workflow fetches the logs, identifies behavioral patterns, checks IP reputation, and creates a ticket or HTML report.
+
+### Method 2: Local Sample Data
+1. Download the provided `sample-data/access.log` from this repository.
+2. In n8n, update the **Read Log File** path to your local directory (e.g., `/tmp/access.log`).
+3. Execute the workflow.
+4. **Expected Result:** Compare your output with `sample-data/report_file-sample.html` to ensure detection patterns match.
 ---
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| **File not found** | Verify log file path in "Read Log File" node; check permissions |
-| **No threats detected** | Verify log format matches parser; check sample data for comparison |
-| **Memory errors (large files)** | Process logs in batches (limit to 10,000 lines per execution) |
-| **Invalid regex errors** | Check pattern syntax in "Detect Threats" node |
-| **Report not generated** | Verify HTML template syntax; check execution logs |
+| **Duplicate Tickets** | Check Prevent Duplicate Incidents node. Records are cached for 24h |
+| **0 Score for IPs** | Ensure threatsDetected array is populated in the Detect Threats node |
+| **AbuseIPDB Errors** | Verify your API key has remaining daily quota (Free tier is 1,000/day) |
+| **Testing Repeats** | Toggle DEBUG_MODE = true in the Deduplication node to clear cache |
 
 **Processing Large Logs:**
 ```bash
-# Split large log into smaller files
-split -l 10000 access.log access_part_
+### 1. Split by Line Count (CLI)
+To keep memory usage low while preserving enough context for the Behavioral Engine to detect the "Kill Chain," split logs into chunks of at least 20,000 lines.
 
-# Process each part separately
-for file in access_part_*; do
-  # Update n8n "Read Log File" path to $file
-  # Execute workflow
-done
+# Split large log into 20k line chunks
+split -l 20000 access.log access_part_
+
+# Push parts to GitHub or your server to process sequentially
+
+### 2. Behavioral Context & Deduplication
+Because the workflow uses a 24-hour cache in the Prevent Duplicate Incidents node:
+
+# If an IP is flagged in access_part_aa, the system will remember that decision when you process access_part_ab.
+# This ensures you don't get duplicate tickets even when processing a single log file in multiple parts
 ```
 
 ---
@@ -272,7 +218,6 @@ MIT License - see [LICENSE](LICENSE)
 
 - Inspired by [UnixGuy](https://youtube.com/@UnixGuy) - Sysadmin and log analysis tutorials
 - Built with [n8n.io](https://n8n.io)
-- Threat patterns based on OWASP Top 10
 
 ---
 
