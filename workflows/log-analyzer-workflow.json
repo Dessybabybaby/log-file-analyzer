@@ -1,0 +1,612 @@
+{
+  "name": "Log File Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  return {\n    json: {\n      logContent: item.json.data,\n      source: 'github',\n      fetchedAt: new Date().toISOString()\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4496,
+        896
+      ],
+      "id": "20073ce4-9d74-4ea1-b2d0-23ca141ade19",
+      "name": "Convert to Text"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nitems.forEach(item => {\n  const lines = item.json.logContent.split('\\n');\n\n  lines.forEach((line, index) => {\n    if (line.trim()) {\n      results.push({\n        json: {\n          lineNumber: index + 1,\n          logLine: line.trim(),\n          ingestedAt: item.json.fetchedAt\n        }\n      });\n    }\n  });\n});\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        896
+      ],
+      "id": "95b8ad7d-ee54-4d0e-b47e-b3b1c7ba4317",
+      "name": "Split into Lines"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse both Web (Apache/Nginx) and System (SSH/Auth) log formats\nconst items = $input.all();\n\nreturn items.map(item => {\n  const line = item.json.logLine;\n  \n  // 1. Apache/Nginx combined log regex\n  const apacheRegex = /^(\\S+) \\S+ \\S+ \\[([^\\]]+)\\] \"(\\S+) ([^\"]*) HTTP\\/[^\"]+\" (\\d+) (\\d+|-) \"([^\"]*)\" \"([^\"]*)\"/;\n  \n  // 2. Linux Auth/SSH regex (e.g., Failed password for root from 192.168.1.100)\n  const authRegex = /([A-Z][a-z]{2}\\s+\\d+\\s\\d{2}:\\d{2}:\\d{2}).*?(\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b)/;\n\n  const apacheMatch = line.match(apacheRegex);\n  const authMatch = line.match(authRegex);\n  \n  if (apacheMatch) {\n    return {\n      json: {\n        lineNumber: item.json.lineNumber,\n        logType: 'WEB',\n        ip: apacheMatch[1],\n        timestamp: apacheMatch[2],\n        method: apacheMatch[3],\n        path: apacheMatch[4],\n        statusCode: parseInt(apacheMatch[5]),\n        userAgent: apacheMatch[8],\n        rawLine: line\n      }\n    };\n  } else if (authMatch) {\n    return {\n      json: {\n        lineNumber: item.json.lineNumber,\n        logType: 'SSH',\n        timestamp: authMatch[1],\n        ip: authMatch[2],\n        path: 'SSH Login Attempt', // Filler for the threat detector\n        method: 'AUTH',\n        statusCode: line.toLowerCase().includes('failed') ? 401 : 200,\n        userAgent: 'Internal System Process',\n        rawLine: line\n      }\n    };\n  }\n  \n  return {\n    json: {\n      ...item.json,\n      parseError: true,\n      rawLine: line\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4944,
+        896
+      ],
+      "id": "8c331b40-eecd-4eef-bd94-54569a91115d",
+      "name": "Parse Log Line"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect security threats using pattern matching\nconst items = $input.all();\n\n// Threat detection patterns\nconst threatPatterns = [\n  {\n    name: 'SQL Injection',\n    regex: /(union\\s+select|or\\s+1\\s*=\\s*1|drop\\s+table|insert\\s+into|';\\s*--)/i,\n    severity: 'CRITICAL',\n    score: 30\n  },\n  {\n    name: 'Path Traversal',\n    regex: /(\\.\\.\\/|\\.\\.%2f|\\.\\.%5c|\\.\\.\\\\|\\.\\.\\/\\.\\.\\/|\\.\\.%252f)/i,\n    severity: 'HIGH',\n    score: 25\n  },\n  {\n    name: 'XSS Attempt',\n    regex: /(<script|javascript:|onerror=|onload=|<img|alert\\(|eval\\()/i,\n    severity: 'HIGH',\n    score: 20\n  },\n  {\n    name: 'Admin Panel Probing',\n    regex: /\\/(admin|administrator|wp-admin|phpmyadmin|adminer|manager)/i,\n    severity: 'MEDIUM',\n    score: 10\n  },\n  {\n    name: 'Scanner Activity',\n    regex: /(\\/config\\.php|\\/\\.env|\\/backup\\.sql|\\/database\\.sql|\\/phpinfo\\.php)/i,\n    severity: 'MEDIUM',\n    score: 15\n  },\n  {\n    name: 'Shell Upload Attempt',\n    regex: /(cmd\\.php|shell\\.asp|backdoor\\.jsp|webshell|c99\\.php|r57\\.php)/i,\n    severity: 'CRITICAL',\n    score: 35\n  },\n  {\n    name: 'Authentication Failure',\n    regex: /(failed password|invalid user|authentication failure)/i,\n    severity: 'MEDIUM',\n    score: 10\n  }\n];\n\nreturn items.map(item => {\n  const path = item.json.path || '';\n  const userAgent = item.json.userAgent || '';\n  const statusCode = item.json.statusCode || 200;\n  const detectedThreats = [];\n  let threatScore = 0;\n  \n  // Check each pattern\n  threatPatterns.forEach(pattern => {\n    if (pattern.regex.test(path) || pattern.regex.test(userAgent)) {\n      detectedThreats.push(pattern.name);\n      threatScore += pattern.score;\n    }\n  });\n  \n  // Additional scoring based on status codes\n  if (statusCode === 403 || statusCode === 401) {\n    threatScore += 5;  // Blocked requests indicate malicious intent\n  }\n  \n  // Check for scanner user agents\n  const scannerAgents = ['nikto', 'nmap', 'sqlmap', 'burp', 'acunetix', 'nessus'];\n  if (scannerAgents.some(scanner => userAgent.toLowerCase().includes(scanner))) {\n    detectedThreats.push('Scanner User-Agent');\n    threatScore += 15;\n  }\n  \n  return {\n    json: {\n      ...item.json,\n      threatsDetected: detectedThreats,\n      threatCount: detectedThreats.length,\n      threatScore: Math.min(threatScore, 100),  // Cap at 100\n      isThreat: detectedThreats.length > 0\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5168,
+        896
+      ],
+      "id": "bb24e5dd-a04e-41a8-90b4-a19d76a08564",
+      "name": "Detect Threats"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst ipMap = {};\n\nitems.forEach(item => {\n  const ip = item.json.ip;\n  if (!ip) return;\n\n  if (!ipMap[ip]) {\n    ipMap[ip] = {\n      ip,\n      behaviors: new Set(),\n      threatNames: new Set(), // Keeps the specific names for your GitHub tickets\n      requestCount: 0,\n      firstSeen: item.json.timestamp,\n      lastSeen: item.json.timestamp\n    };\n  }\n\n  const entry = ipMap[ip];\n  entry.requestCount++;\n  entry.lastSeen = item.json.timestamp;\n\n  const threats = item.json.threatsDetected || [];\n\n  threats.forEach(t => {\n    entry.threatNames.add(t); // Maintains the list for the GitHub \"Patterns\" field\n    \n    // Categorize specific threats into behavioral stages\n    if (t.includes('Scanner') || t.includes('404')) entry.behaviors.add('recon');\n    if (t.includes('Admin')) entry.behaviors.add('discovery');\n    if (t.includes('Authentication')) entry.behaviors.add('bruteforce');\n    if (t.includes('SQL') || t.includes('XSS')) entry.behaviors.add('exploit');\n    if (t.includes('Shell')) entry.behaviors.add('compromise');\n  });\n});\n\nfunction calculateScore(entry) {\n  let score = 0;\n\n  // Behavior Weights\n  if (entry.behaviors.has('recon')) score += 10;\n  if (entry.behaviors.has('discovery')) score += 15;\n  if (entry.behaviors.has('bruteforce')) score += 20;\n  if (entry.behaviors.has('exploit')) score += 40;\n  if (entry.behaviors.has('compromise')) score += 60;\n\n  // Velocity scoring (Automation detection)\n  if (entry.requestCount > 200) score += 25;\n\n  // Multi-stage attack bonus (The \"Intent\" bonus)\n  if (entry.behaviors.size >= 3) score += 20;\n\n  return Math.min(score, 100);\n}\n\nconst results = Object.values(ipMap).map(entry => {\n  const finalScore = calculateScore(entry);\n\n  let risk = 'LOW';\n  if (finalScore >= 80) risk = 'CRITICAL';\n  else if (finalScore >= 50) risk = 'HIGH';\n  else if (finalScore >= 25) risk = 'MEDIUM';\n\n  return {\n    json: {\n      ip: entry.ip,\n      requestCount: entry.requestCount,\n      // We keep 'threatTypes' so your downstream nodes don't turn red\n      threatTypes: Array.from(entry.threatNames).join(', '),\n      behaviorPatterns: Array.from(entry.behaviors).join(', '),\n      finalThreatScore: finalScore,\n      riskLevel: risk,\n      firstSeen: entry.firstSeen,\n      lastSeen: entry.lastSeen\n    }\n  };\n});\n\n// Sort by highest score\nreturn results.sort((a, b) => b.json.finalThreatScore - a.json.finalThreatScore);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5392,
+        896
+      ],
+      "id": "3fba150f-a0d8-4ed4-a08f-28211d56fdf3",
+      "name": "Aggregate Threats by IP"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n/* ------------------------\n   Aggregations\n------------------------- */\nconst totalIPs = items.length;\nconst totalRequests = items.reduce((s, i) => s + (i.json.requestCount || 0), 0);\n// We use finalThreatScore as a proxy for threat activity in the new behavioral model\nconst totalHighRiskEvents = items.filter(i => i.json.finalThreatScore > 25).length;\n\nconst riskCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };\nconst actionCounts = { BLOCK: 0, INVESTIGATE: 0, MONITOR: 0 };\n\nitems.forEach(i => {\n  const level = i.json.riskLevel;\n  if (riskCounts[level] !== undefined) riskCounts[level]++;\n  \n  const action = i.json.socAction;\n  if (actionCounts[action] !== undefined) actionCounts[action]++;\n});\n\nconst topThreatIPs = [...items]\n  .sort((a, b) => (b.json.finalThreatScore || 0) - (a.json.finalThreatScore || 0))\n  .slice(0, 10);\n\n/* ------------------------\n   Helper: Risk Distribution Bars\n------------------------- */\nconst riskBar = (label, count, color) => {\n  const percent = totalIPs ? Math.round((count / totalIPs) * 100) : 0;\n  return `\n  <div style=\"margin-bottom:12px;\">\n    <div style=\"display:flex; justify-content:between; font-size:13px; margin-bottom:4px;\">\n        <span><b>${label}</b></span>\n        <span style=\"margin-left:auto;\">${count} (${percent}%)</span>\n    </div>\n    <div style=\"background:#e5e7eb; height:12px; border-radius:6px; width:100%;\">\n      <div style=\"width:${percent}%; height:12px; background:${color}; border-radius:6px;\"></div>\n    </div>\n  </div>`;\n};\n\n/* ------------------------\n   Full HTML Report Construction\n------------------------- */\nconst attachmentHtml = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\" />\n<style>\n    body { font-family: 'Segoe UI', Arial, sans-serif; background:#f9fafb; padding:40px; color:#1e293b; line-height: 1.5; }\n    .container { max-width: 1000px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }\n    h1 { color:#0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }\n    h2 { color:#1e40af; margin-top: 30px; border-left: 4px solid #1e40af; padding-left: 10px; padding-bottom: 2px; }\n    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }\n    .stat-card { background: #f1f5f9; padding: 15px; border-radius: 6px; text-align: center; }\n    .stat-val { display: block; font-size: 24px; font-weight: bold; color: #1e3c72; }\n    table { width:100%; border-collapse:collapse; margin-top:15px; background: white; }\n    th, td { border:1px solid #e2e8f0; padding:12px; text-align:left; }\n    th { background:#1e40af; color:white; text-transform: uppercase; font-size: 12px; }\n    tr:nth-child(even) { background:#f8fafc; }\n    .action-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }\n    .bg-block { background: #fee2e2; color: #b91c1c; border: 1px solid #f87171; }\n    .bg-investigate { background: #ffedd5; color: #9a3412; border: 1px solid #fb923c; }\n    .bg-monitor { background: #dcfce7; color: #15803d; border: 1px solid #4ade80; }\n    .risk-CRITICAL { color: #b91c1c; font-weight:bold; }\n    .risk-HIGH { color: #9a3412; font-weight:bold; }\n</style>\n</head>\n<body>\n<div class=\"container\">\n    <h1>Security Operations Audit Report</h1>\n    \n    <section>\n        <h2>Executive Summary</h2>\n        <div class=\"stats-grid\">\n            <div class=\"stat-card\"><span class=\"stat-val\">${totalRequests}</span>Requests</div>\n            <div class=\"stat-card\"><span class=\"stat-val\">${totalIPs}</span>Unique IPs</div>\n            <div class=\"stat-card\"><span class=\"stat-val\">${actionCounts.BLOCK}</span>IPs Blocked</div>\n            <div class=\"stat-card\"><span class=\"stat-val\">${riskCounts.CRITICAL + riskCounts.HIGH}</span>High/Crit Alerts</div>\n        </div>\n    </section>\n\n    <section>\n        <h2>🛡️ Automated Actions Taken</h2>\n        <p style=\"font-size: 14px; color: #64748b;\">Summary of autonomous responses performed by the SOC Pipeline.</p>\n        <table>\n            <thead>\n                <tr>\n                    <th>Action</th>\n                    <th>Count</th>\n                    <th>Response Strategy</th>\n                </tr>\n            </thead>\n            <tbody>\n                <tr>\n                    <td><span class=\"action-badge bg-block\">BLOCK</span></td>\n                    <td><b>${actionCounts.BLOCK}</b></td>\n                    <td>Automatic firewall rejection & reputation blacklisting.</td>\n                </tr>\n                <tr>\n                    <td><span class=\"action-badge bg-investigate\">INVESTIGATE</span></td>\n                    <td><b>${actionCounts.INVESTIGATE}</b></td>\n                    <td>GitHub Incident Ticket created for manual analyst review.</td>\n                </tr>\n                <tr>\n                    <td><span class=\"action-badge bg-monitor\">MONITOR</span></td>\n                    <td><b>${actionCounts.MONITOR}</b></td>\n                    <td>Logged to behavioral database; no immediate action required.</td>\n                </tr>\n            </tbody>\n        </table>\n    </section>\n\n    <section>\n        <h2>Risk Distribution</h2>\n        <div style=\"max-width: 500px;\">\n            ${riskBar('CRITICAL', riskCounts.CRITICAL, '#dc2626')}\n            ${riskBar('HIGH', riskCounts.HIGH, '#f97316')}\n            ${riskBar('MEDIUM', riskCounts.MEDIUM, '#facc15')}\n            ${riskBar('LOW', riskCounts.LOW, '#10b981')}\n        </div>\n    </section>\n\n    <section>\n        <h2>Top 10 Threat IPs</h2>\n        <table>\n            <thead>\n                <tr>\n                    <th>IP Address</th>\n                    <th>Risk</th>\n                    <th>Score</th>\n                    <th>Behaviors</th>\n                    <th>Action Taken</th>\n                </tr>\n            </thead>\n            <tbody>\n                ${topThreatIPs.map(i => `\n                <tr>\n                    <td><b>${i.json.ip}</b></td>\n                    <td class=\"risk-${i.json.riskLevel}\">${i.json.riskLevel}</td>\n                    <td>${i.json.finalThreatScore}</td>\n                    <td style=\"font-size: 11px;\">${i.json.behaviorPatterns || 'N/A'}</td>\n                    <td><span class=\"action-badge bg-${(i.json.socAction || 'monitor').toLowerCase()}\">${i.json.socAction}</span></td>\n                </tr>`).join('')}\n            </tbody>\n        </table>\n    </section>\n\n    <footer style=\"margin-top:40px; border-top:1px solid #e2e8f0; padding-top:10px; font-size:12px; color:#64748b;\">\n        Generated by SOC Automation Pipeline • ${new Date().toUTCString()}\n    </footer>\n</div>\n</body>\n</html>`;\n\nreturn {\n  json: {\n    emailHtml: attachmentHtml,\n    alertCount: riskCounts.CRITICAL + riskCounts.HIGH,\n    summaryStats: { totalIPs, actionCounts, riskCounts }\n  },\n  binary: {\n    report_file: {\n      data: Buffer.from(attachmentHtml, 'utf8').toString('base64'),\n      fileName: `SOC_Action_Report_${new Date().toISOString().split('T')[0]}.html`,\n      mimeType: 'text/html'\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5424,
+        1360
+      ],
+      "id": "1457d537-7fdb-4de4-8a30-1f6b79705bb3",
+      "name": "Generate HTML Report"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        4048,
+        800
+      ],
+      "id": "b9a55da2-25e3-4c00-a93b-e56cc3b3da2d",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        4272,
+        896
+      ],
+      "id": "2156a5a4-31e0-4e4b-a495-b6439011d654",
+      "name": "Read Log File"
+    },
+    {
+      "parameters": {
+        "subject": "=SOC Alert: {{ $json.alertCount }} High-Risk Threats Detected ({{ new Date().toLocaleDateString() }})",
+        "message": "=<p>Hello Team,</p>\n<p>The <strong>Automated SOC Pipeline</strong> has completed its latest log analysis. Significant threats were identified and mitigated.</p>\n\n<h3>Summary of Findings:</h3>\n<ul>\n  <li><strong>Total IPs Analyzed:</strong> {{ $json.summaryStats.totalIPs }}</li>\n  <li><strong>Critical/High Risk Alerts:</strong> {{ $json.alertCount }}</li>\n  <li><strong>Autonomous Blocks:</strong> {{ $json.summaryStats.actionCounts.BLOCK }}</li>\n</ul>\n\n<p>A detailed <strong>Security Operations Audit Report</strong> has been attached to this email for your review.</p>\n\n<p><em>This is an automated response. No action is required for blocked IPs.</em></p>",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "report_file"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        5648,
+        1360
+      ],
+      "id": "b191b7b2-de7d-4a11-8034-04a0b789e1c7",
+      "name": "Save Report",
+      "webhookId": "e5647a24-e1a9-4e9e-949c-1936d6dfcde7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4rgf3onoG15TrvnQ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.abuseipdb.com/api/v2/check",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ipAddress",
+              "value": "={{$json[\"ip\"]}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {}
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5840,
+        896
+      ],
+      "id": "0e7ccd27-f87c-4971-9733-4e86f90abd48",
+      "name": "IP Reputation Lookup",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n\n  const abuse = item.json?.data || {};\n  const score = abuse.abuseConfidenceScore ?? 0;\n  const reports = abuse.totalReports ?? 0;\n  const country = abuse.countryCode ?? \"Unknown\";\n\n  let reputation = \"UNKNOWN\";\n  if (score >= 80) reputation = \"MALICIOUS\";\n  else if (score >= 30) reputation = \"SUSPICIOUS\";\n  else reputation = \"CLEAN\";\n\n  return {\n    json: {\n      ...item.json,\n      reputationScore: score,\n      reputationReports: reports,\n      countryCode: country,\n      reputation: reputation\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6064,
+        896
+      ],
+      "id": "69495e36-52a0-42e6-ad33-e5864302b715",
+      "name": "Parse Reputation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n// Reach back to the Aggregate node to get the original scores and metadata\nconst aggregateNodeData = $(\"Aggregate Threats by IP\").all();\n\nreturn items.map(item => {\n  const currentIp = item.json.ip || item.json.data?.ipAddress;\n  \n  // Find the matching IP data from the aggregate node\n  const originalData = aggregateNodeData.find(a => a.json.ip === currentIp);\n  \n  // Pulling specific metadata to fix the \"red\" variable issues\n  const score = originalData ? originalData.json.finalThreatScore : 0;\n  const threatTypes = originalData ? originalData.json.threatTypes : \"None Detected\";\n  const requestCount = originalData ? originalData.json.requestCount : 0;\n  \n  const rep = item.json.reputation || \"UNKNOWN\";\n\n  let action = \"IGNORE\";\n  let severity = \"LOW\";\n\n  // Logic for Action and Severity\n  if (score >= 40 && rep === \"MALICIOUS\") {\n    action = \"BLOCK\";\n    severity = \"CRITICAL\";\n  } \n  else if (score >= 40 || rep === \"MALICIOUS\") {\n    action = \"INVESTIGATE\";\n    severity = \"HIGH\";\n  }\n  else if (score >= 20) {\n    action = \"MONITOR\";\n    severity = \"MEDIUM\";\n  }\n\n  return {\n    json: {\n      ...item.json,\n      ip: currentIp,           // Ensures 'ip' is at the top level\n      finalThreatScore: score, // Corrects the 0 score issue\n      threatTypes: threatTypes, // Fixes the red variable in GitHub\n      requestCount: requestCount, // Fixes the red variable in GitHub\n      socAction: action,\n      socSeverity: severity\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        1264
+      ],
+      "id": "ca30fadb-ac4d-4988-a179-181d7624a25f",
+      "name": "Decision Engine"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "96ac90c0-8c0e-43c5-b6f9-b8d68097dcb7",
+              "leftValue": "={{ $json.socAction }}",
+              "rightValue": "=BLOCK",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4976,
+        1360
+      ],
+      "id": "0e6c4327-f966-4187-8014-73dec5228400",
+      "name": "Route by Action"
+    },
+    {
+      "parameters": {
+        "jsCode": "// This simulates sending data to a Firewall (like Cloudflare, CrowdSec, or IPTables)\nconst items = $input.all();\n\nconst blocked = items.map(item => {\n  return {\n    json: {\n      blockedIp: item.json.ip || item.json.data?.ipAddress,\n      reason: `Automated SOC Block: ${item.json.socSeverity}`,\n      threatScore: item.json.finalThreatScore,\n      externalReputation: item.json.reputation,\n      status: \"SUCCESS\",\n      timestamp: new Date().toISOString(),\n      firewallAction: \"DROP\"\n    }\n  };\n});\n\n// We wrap it this way so the output is a clean list of blocked actions\nreturn blocked;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        1280
+      ],
+      "id": "a9fe57bc-1550-4c48-998a-961310dffd30",
+      "name": "Add to Blocklist"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d2355557-ee73-46c0-8b58-bf9f455739de",
+              "leftValue": "={{ $json.ip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "3b0a36d5-b000-4a56-b96c-421ed254b28f",
+              "leftValue": "={{ $json.ip }}",
+              "rightValue": "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        5616,
+        896
+      ],
+      "id": "1b702551-c7db-4495-8ea9-8029c620f2b8",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "97bba030-7d9a-42c3-96d0-77160c0b65f9",
+              "leftValue": "={{ $json.socAction }}",
+              "rightValue": "IGNORE",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4736,
+        1152
+      ],
+      "id": "366c942f-2d07-4740-acc2-1299f3e2772d",
+      "name": "Needs Investigation"
+    },
+    {
+      "parameters": {
+        "owner": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Dessybabybaby"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "soc-incidents",
+          "mode": "list",
+          "cachedResultName": "soc-incidents",
+          "cachedResultUrl": "https://github.com/Dessybabybaby/soc-incidents"
+        },
+        "title": "=SOC Alert: {{ $json.ip }} - {{ $json.socSeverity }}",
+        "body": "=### Automated Incident Report\n\n**IP:** {{ $json.ip }}\n**Severity:** {{ $json.socSeverity }}\n**Action:** {{ $json.socAction }}\n\n---\n**Threat Types:** {{ $json.threatTypes }}\n**Reputation:** {{ $json.reputation }}\n**Score:** {{ $json.finalThreatScore }}\n\n*Generated by n8n SOC Pipeline*",
+        "labels": [],
+        "assignees": []
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        4960,
+        1152
+      ],
+      "id": "ce2baae0-f275-427b-9e82-843bb14adcab",
+      "name": "Create Incident Ticket",
+      "webhookId": "1e94ab8e-0e36-47fb-9079-b5e13028d25b",
+      "credentials": {
+        "githubApi": {
+          "id": "dqKDrrh3fUe9A9pl",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        4048,
+        992
+      ],
+      "id": "0e1f8b83-1477-4b73-8afc-c631bd4a0f66",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst DEBUG_MODE = false;     // Set to true to bypass/clear cache\nconst CACHE_TTL_HOURS = 24;   // How long to remember an incident (24 hours)\n// ---------------------\n\nconst staticData = $getWorkflowStaticData('global');\n\n// 1. Handle Debug Mode\nif (DEBUG_MODE) {\n  staticData.processedIncidents = {}; \n  return $input.all(); \n}\n\nstaticData.processedIncidents = staticData.processedIncidents || {};\nconst now = Date.now();\nconst ttlMilliseconds = CACHE_TTL_HOURS * 60 * 60 * 1000;\n\nreturn $input.all().filter(item => {\n  const ip = item.json.ip;\n  const action = item.json.socAction;\n  const incidentKey = `${ip}-${action}`;\n\n  // 2. Check if record exists and if it's still fresh\n  if (staticData.processedIncidents[incidentKey]) {\n    const lastSeen = new Date(staticData.processedIncidents[incidentKey]).getTime();\n    \n    if (now - lastSeen < ttlMilliseconds) {\n      return false; // Still in \"cooldown\" - skip duplication\n    }\n  }\n\n  // 3. Mark as seen (or refresh the timestamp)\n  staticData.processedIncidents[incidentKey] = new Date().toISOString();\n  return true;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4752,
+        1360
+      ],
+      "id": "e8c1451d-d8ec-4035-88de-98d7f497cd46",
+      "name": "Prevent Duplicate Incidents"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Convert to Text": {
+      "main": [
+        [
+          {
+            "node": "Split into Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into Lines": {
+      "main": [
+        [
+          {
+            "node": "Parse Log Line",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Log Line": {
+      "main": [
+        [
+          {
+            "node": "Detect Threats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Threats": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Threats by IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Threats by IP": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Save Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Log File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Log File": {
+      "main": [
+        [
+          {
+            "node": "Convert to Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IP Reputation Lookup": {
+      "main": [
+        [
+          {
+            "node": "Parse Reputation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reputation": {
+      "main": [
+        [
+          {
+            "node": "Decision Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Engine": {
+      "main": [
+        [
+          {
+            "node": "Needs Investigation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prevent Duplicate Incidents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action": {
+      "main": [
+        [
+          {
+            "node": "Add to Blocklist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "IP Reputation Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Blocklist": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Investigation": {
+      "main": [
+        [
+          {
+            "node": "Create Incident Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Log File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prevent Duplicate Incidents": {
+      "main": [
+        [
+          {
+            "node": "Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "6a4d2636-b112-46a9-b6dd-047244119c31",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "420da16e8a4bbbd9d07a488b082e20b52badc29a41dd5a8a3840782b3e7ae978"
+  },
+  "id": "tJhNrRL44EIAMr555-Kff",
+  "tags": []
+}
